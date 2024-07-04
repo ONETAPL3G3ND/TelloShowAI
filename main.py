@@ -1,52 +1,61 @@
 import cv2
-import numpy as np
+from djitellopy import Tello
 
+tello = Tello()
+tello.connect()
+tello.streamon()
+tello.takeoff()
+tello.move_up(100)
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-def detect_ring(frame):
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+def detect_face(frame):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+    if len(faces) > 0:
+        return faces[0]
+    return None
 
-    lower_blue = np.array([100, 150, 0])
-    upper_blue = np.array([140, 255, 255])
-
-    mask = cv2.inRange(hsv, lower_blue, upper_blue)
-
-    mask = cv2.GaussianBlur(mask, (5, 5), 0)
-
-    kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    for contour in contours:
-        if cv2.contourArea(contour) < 500:
-            continue
-
-        x, y, w, h = cv2.boundingRect(contour)
-
-        aspect_ratio = w / float(h)
-        area = cv2.contourArea(contour)
-        rect_area = w * h
-        extent = area / float(rect_area)
-
-        if 0.8 < aspect_ratio < 1.2 and extent > 0.5:
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            print(f"Кольцо найдено! Позиция: ({x}, {y}), Ширина: {w}, Высота: {h}")
-
-    return frame
-cap = cv2.VideoCapture(0)
 
 while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
+    frame = tello.get_frame_read().frame
+    frame = cv2.resize(frame, (640, 480))
+    face = detect_face(frame)
 
-    frame = detect_ring(frame)
+    if face is not None:
+        (x, y, w, h) = face
+        x_center = x + w // 2
+        y_center = y + h // 2
 
-    cv2.imshow('Ring Detection', frame)
+        frame_center_x = 320
+        frame_center_y = 240
+
+        if x_center < frame_center_x - 10:
+            tello.send_rc_control(-40, 0, 0, 0)
+        elif x_center > frame_center_x + 10:
+            tello.send_rc_control(40, 0, 0, 0)
+        else:
+            tello.send_rc_control(0, 0, 0, 0)
+
+        if y_center < frame_center_y - 10:
+            tello.send_rc_control(0, 0, 40, 0)
+        elif y_center > frame_center_y + 10:
+            tello.send_rc_control(0, 0, -40, 0)
+        else:
+            tello.send_rc_control(0, 0, 0, 0)
+
+        face_area = w * h
+        frame_area = 640 * 480
+        face_ratio = face_area / frame_area
+
+        if face_ratio < 0.1:
+            tello.send_rc_control(0, 40, 0, 0)
+        else:
+            tello.send_rc_control(0, 0, 0, 0)
+
+    cv2.imshow("Tello Video", frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-cap.release()
+tello.land()
 cv2.destroyAllWindows()
